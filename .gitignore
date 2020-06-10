@@ -12,3 +12,7 @@ cpu*.out
 mem*.out
 cpu*.pdf
 mem*.pdf
+heap*.pdf
+profile*.pdf
+
+torture/leveldb*

@@ -69,6 +69,10 @@ func NewMutableTreeWithOpts(snapDB dbm.DB, recentDB dbm.DB, cacheSize int, opts 
 	}, nil
 }
 
+func (tree *MutableTree) Close() error {
+	return tree.ndb.snapshotDB.Close()
+}
+
 // IsEmpty returns whether or not the tree has any keys. Only trees that are
 // not empty can be saved.
 func (tree *MutableTree) IsEmpty() bool {

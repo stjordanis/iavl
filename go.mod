@@ -13,3 +13,5 @@ require (
 	golang.org/x/crypto v0.0.0-20200429183012-4b2356b1ed79
 	google.golang.org/protobuf v1.24.0
 )
+
+replace github.com/tendermint/tm-db => ../tm-db
