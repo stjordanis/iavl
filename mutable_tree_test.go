@@ -3,6 +3,7 @@ package iavl
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
 	"runtime"
 	"testing"
 
@@ -213,6 +214,45 @@ func TestDelete(t *testing.T) {
 	k1Value, _, err = tree.GetVersionedWithProof([]byte("k1"), version)
 	require.Nil(t, err)
 	require.Equal(t, 0, bytes.Compare([]byte("Fred"), k1Value))
+}
+
+// This is a test for issue #261, where deleting the previous version while creating new versions
+// which update keys caused panics. If this does not panic, then the test passes. This test case
+// evolved from a debug script.
+// https://github.com/tendermint/iavl/issues/261
+func TestDeleteVersion_issue261(t *testing.T) {
+	tree, err := NewMutableTreeWithOpts(db.NewMemDB(), db.NewMemDB(), 0, &Options{
+		// These settings correspond to PruneEverything in the SDK.
+		KeepEvery:  1,
+		KeepRecent: 0,
+	})
+	require.NoError(t, err)
+
+	for version := int64(0); version < 10; version++ {
+		// For each version, reset the PRNG so we generate the same key sequence in each iteration.
+		r := rand.New(rand.NewSource(49872768940))
+		for i := 0; i < int(4+2*version); i++ {
+			key := make([]byte, 16)
+			value := make([]byte, 16)
+			r.Read(key)
+			r.Read(value)
+			// If the Set hits an existing key, generate a new key until we find an unused one.
+			for tree.Set(key, value) {
+				r.Read(key)
+			}
+		}
+
+		_, _, err = tree.SaveVersion()
+		require.NoError(t, err)
+		t.Logf("Saved version %v", version)
+
+		// Delete the previous version
+		if version > 1 {
+			err = tree.DeleteVersion(version - 1)
+			require.NoError(t, err)
+			t.Logf("Deleted version %v", version-1)
+		}
+	}
 }
 
 func TestTraverse(t *testing.T) {
