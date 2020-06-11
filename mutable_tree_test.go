@@ -2,6 +2,7 @@ package iavl
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"runtime"
@@ -228,7 +229,7 @@ func TestDeleteVersion_issue261(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	for version := int64(0); version < 10; version++ {
+	for version := int64(1); version < 10; version++ {
 		// For each version, reset the PRNG so we generate the same key sequence in each iteration.
 		r := rand.New(rand.NewSource(49872768940))
 		for i := 0; i < int(4+2*version); i++ {
@@ -237,7 +238,13 @@ func TestDeleteVersion_issue261(t *testing.T) {
 			r.Read(key)
 			r.Read(value)
 			// If the Set hits an existing key, generate a new key until we find an unused one.
-			for tree.Set(key, value) {
+			for {
+				if fmt.Sprintf("%x", key) == "7964949ef8e454db964cee3fc608b69a" {
+					fmt.Printf("Set v%v %x = %x\n", version, key, value)
+				}
+				if !tree.Set(key, value) {
+					break
+				}
 				r.Read(key)
 			}
 		}
@@ -246,6 +253,14 @@ func TestDeleteVersion_issue261(t *testing.T) {
 		require.NoError(t, err)
 		t.Logf("Saved version %v", version)
 
+		k, err := hex.DecodeString("7964949ef8e454db964cee3fc608b69a")
+		require.NoError(t, err)
+		_, value := tree.Get(k)
+		fmt.Printf("Get v%v %x = %x\n", version, k, value)
+
+		fmt.Printf("Version %v\n", version)
+		fmt.Println(tree.String())
+
 		// Delete the previous version
 		if version > 1 {
 			err = tree.DeleteVersion(version - 1)
@@ -253,6 +268,49 @@ func TestDeleteVersion_issue261(t *testing.T) {
 			t.Logf("Deleted version %v", version-1)
 		}
 	}
+}
+
+// This is a test for issue #261, where deleting the previous version while creating new versions
+// which update keys caused panics. If this does not panic, then the test passes. This test case
+// evolved from a debug script.
+// https://github.com/tendermint/iavl/issues/261
+func TestDeleteVersion_issue261_minimal(t *testing.T) {
+	tree, err := NewMutableTreeWithOpts(db.NewMemDB(), db.NewMemDB(), 0, &Options{
+		// These settings correspond to PruneEverything in the SDK.
+		KeepEvery:  1,
+		KeepRecent: 0,
+	})
+	require.NoError(t, err)
+
+	tree.Set([]byte("a"), []byte{1})
+	tree.Set([]byte("b"), []byte{1})
+	tree.Set([]byte("c"), []byte{1})
+	_, _, err = tree.SaveVersion()
+	require.NoError(t, err)
+
+	tree.Set([]byte("aa"), []byte{2})
+	tree.Set([]byte("b"), []byte{2})
+	tree.Set([]byte("cc"), []byte{2})
+	_, _, err = tree.SaveVersion()
+	require.NoError(t, err)
+	err = tree.DeleteVersion(1)
+	require.NoError(t, err)
+
+	tree.Set([]byte("a"), []byte{3})
+	tree.Set([]byte("bb"), []byte{3})
+	tree.Set([]byte("c"), []byte{3})
+	_, _, err = tree.SaveVersion()
+	require.NoError(t, err)
+	err = tree.DeleteVersion(2)
+	require.NoError(t, err)
+
+	tree.Set([]byte("a"), []byte{4})
+	tree.Set([]byte("b"), []byte{4})
+	tree.Set([]byte("c"), []byte{4})
+	_, _, err = tree.SaveVersion()
+	require.NoError(t, err)
+	err = tree.DeleteVersion(3)
+	require.NoError(t, err)
 }
 
 func TestTraverse(t *testing.T) {

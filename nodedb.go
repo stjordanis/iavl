@@ -231,15 +231,15 @@ func (ndb *nodeDB) saveNodeBatch(node *Node, flushToDisk bool, rb, sb dbm.Batch)
 		panic(err)
 	}
 
-	if !node.saved {
-		node.saved = true
-		rb.Set(ndb.nodeKey(node.hash), buf.Bytes())
-	}
-
 	if flushToDisk {
+		debug("SAVE DISK %X (leaf:%v)\n", node.hash, node.leftHash == nil && node.rightHash == nil)
 		sb.Set(ndb.nodeKey(node.hash), buf.Bytes())
 		node.persisted = true
 		node.saved = true
+	} else if !node.saved {
+		debug("SAVE MEM %X\n", node.hash)
+		node.saved = true
+		rb.Set(ndb.nodeKey(node.hash), buf.Bytes())
 	}
 }
 
@@ -991,12 +991,12 @@ func (ndb *nodeDB) String() string {
 	index := 0
 
 	ndb.traversePrefix(rootKeyFormat.Key(), func(key, value []byte) {
-		str += fmt.Sprintf("%s: %x\n", string(key), value)
+		str += fmt.Sprintf("root %s: %x\n", string(key), value)
 	})
 	str += "\n"
 
 	ndb.traverseOrphans(func(key, value []byte) {
-		str += fmt.Sprintf("%s: %x\n", string(key), value)
+		str += fmt.Sprintf("orphan %x = %x\n", key, value)
 	})
 	str += "\n"
 
@@ -1007,10 +1007,10 @@ func (ndb *nodeDB) String() string {
 		case node == nil:
 			str += fmt.Sprintf("%s%40x: <nil>\n", nodeKeyFormat.Prefix(), hash)
 		case node.value == nil && node.height > 0:
-			str += fmt.Sprintf("%s%40x: %s   %-16s h=%d version=%d\n",
+			str += fmt.Sprintf("%s%40x: %x   %x h=%d version=%d\n",
 				nodeKeyFormat.Prefix(), hash, node.key, "", node.height, node.version)
 		default:
-			str += fmt.Sprintf("%s%40x: %s = %-16s h=%d version=%d\n",
+			str += fmt.Sprintf("%s%40x: %x = %x h=%d version=%d\n",
 				nodeKeyFormat.Prefix(), hash, node.key, node.value, node.height, node.version)
 		}
 		index++

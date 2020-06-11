@@ -141,6 +141,10 @@ func (tree *MutableTree) prepareOrphansSlice() []*Node {
 // Set sets a key in the working tree. Nil values are not supported.
 func (tree *MutableTree) Set(key, value []byte) bool {
 	orphaned, updated := tree.set(key, value)
+	debug("SET %X=%X (updated: %v)\n", key, value, updated)
+	for _, o := range orphaned {
+		debug("  ORPHANED %X\n", o.hash)
+	}
 	tree.addOrphans(orphaned)
 	return updated
 }
@@ -198,10 +202,12 @@ func (tree *MutableTree) recursiveSet(node *Node, key []byte, value []byte, orph
 				version:   version,
 			}, false
 		default:
+			debug("ORPHAN-UPDATE %X\n", node.hash)
 			*orphans = append(*orphans, node)
 			return NewNode(key, value, version), true
 		}
 	} else {
+		debug("ORPHAN-RECURSIVE-INNER %X\n", node.hash)
 		*orphans = append(*orphans, node)
 		node = node.clone(version)
 
@@ -740,6 +746,7 @@ func (tree *MutableTree) deleteNodes(version int64, hash []byte) error {
 			tree.ndb.recentBatch.Delete(tree.ndb.nodeKey(hash))
 		}
 		if vm.Snapshot {
+			debug("DELETE DISK %X\n", hash)
 			tree.ndb.snapshotBatch.Delete(tree.ndb.nodeKey(hash))
 		}
 	}
@@ -754,6 +761,9 @@ func (tree *MutableTree) rotateRight(node *Node) (*Node, *Node) {
 	// TODO: optimize balance & rotate.
 	node = node.clone(version)
 	orphaned := node.getLeftNode(tree.ImmutableTree)
+	if orphaned != nil {
+		debug("ORPHAN-ROTATE-RIGHT %X\n", orphaned.hash)
+	}
 	newNode := orphaned.clone(version)
 
 	newNoderHash, newNoderCached := newNode.rightHash, newNode.rightNode
@@ -773,6 +783,9 @@ func (tree *MutableTree) rotateLeft(node *Node) (*Node, *Node) {
 	// TODO: optimize balance & rotate.
 	node = node.clone(version)
 	orphaned := node.getRightNode(tree.ImmutableTree)
+	if orphaned != nil {
+		debug("ORPHAN-ROTATE-LEFT %X\n", orphaned.hash)
+	}
 	newNode := orphaned.clone(version)
 
 	newNodelHash, newNodelCached := newNode.leftHash, newNode.leftNode
@@ -804,6 +817,7 @@ func (tree *MutableTree) balance(node *Node, orphans *[]*Node) (newSelf *Node) {
 		var leftOrphaned *Node
 
 		left := node.getLeftNode(tree.ImmutableTree)
+		debug("ORPHAN-BALANCE-LEFT %X\n", left.hash)
 		node.leftHash = nil
 		node.leftNode, leftOrphaned = tree.rotateLeft(left)
 		newNode, rightOrphaned := tree.rotateRight(node)
@@ -821,6 +835,7 @@ func (tree *MutableTree) balance(node *Node, orphans *[]*Node) (newSelf *Node) {
 		var rightOrphaned *Node
 
 		right := node.getRightNode(tree.ImmutableTree)
+		debug("ORPHAN-BALANCE-RIGHT %X\n", right.hash)
 		node.rightHash = nil
 		node.rightNode, rightOrphaned = tree.rotateRight(right)
 		newNode, leftOrphaned := tree.rotateLeft(node)
