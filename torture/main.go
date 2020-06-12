@@ -27,18 +27,22 @@ func main() {
 	}
 }
 
-// pruning=everything
 func runPruning() error {
+	// This follows SDK behavior
+	keepEvery := int64(10)
+	keepRecent := int64(1)
+	if keepEvery == 1 {
+		keepRecent = 0
+	}
+
 	levelDB, err := db.NewGoLevelDB("pruning", "")
 	if err != nil {
 		return err
 	}
 	memDB := db.NewMemDB()
 	tree, err := iavl.NewMutableTreeWithOpts(levelDB, memDB, 0, &iavl.Options{
-		// These settings correspond to PruneEverything in the SDK.
-		KeepEvery:  1,
-		KeepRecent: 0,
-		Sync:       true,
+		KeepEvery:  keepEvery,
+		KeepRecent: keepRecent,
 	})
 	if err != nil {
 		return err
@@ -52,30 +56,24 @@ func runPruning() error {
 
 	for {
 		for i := 0; i < 4096; i++ {
-			key := make([]byte, 16)
-			value := make([]byte, 16)
-			r.Read(key)
-			r.Read(value)
-			// if we get an update, set again
-			for tree.Set(key, value) {
-				r.Read(key)
-			}
+			key := []byte(fmt.Sprintf("%v", r.Intn(65536)))
+			value := []byte(fmt.Sprintf("%v", r.Intn(1<<20)))
+			tree.Set(key, value)
 		}
 
-		// Save the next version
 		_, version, err = tree.SaveVersion()
 		if err != nil {
 			return err
 		}
 		fmt.Printf("Saved version %v\n", version)
 
-		// Delete the previous version
-		if version > 1 {
-			err = tree.DeleteVersion(version - 1)
+		// Delete the previous keepEvery version if it's a multiple of KeepEvery
+		if version%keepEvery == 0 && version > keepEvery {
+			err = tree.DeleteVersion(version - keepEvery)
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Deleted version %v\n", version-1)
+			fmt.Printf("Deleted version %v\n", version-keepEvery)
 		}
 	}
 }
