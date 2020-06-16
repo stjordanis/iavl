@@ -225,7 +225,7 @@ func (ndb *nodeDB) saveNodeBatch(node *Node, flushToDisk bool, rb, sb dbm.Batch)
 
 	// Save node bytes to db.
 	var buf bytes.Buffer
-	buf.Grow(node.aminoSize())
+	buf.Grow(node.encodedSize())
 
 	if err := node.writeBytes(&buf); err != nil {
 		panic(err)
