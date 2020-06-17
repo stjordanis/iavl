@@ -3,8 +3,11 @@ package iavl
 
 import (
 	"bytes"
+	"encoding/base64"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"math/rand"
 	"os"
 	"runtime"
 	"strconv"
@@ -1473,5 +1476,104 @@ func TestLoadVersionForOverwritingCase3(t *testing.T) {
 	for i := byte(0); i < 20; i++ {
 		_, v := tree.Get([]byte{i})
 		require.Equal([]byte{i}, v)
+	}
+}
+
+// Randomized test that runs all sorts of random operations, mirroring them in a known-good
+// map, and verifying the state of the tree.
+func TestRandomOperations(t *testing.T) {
+	const (
+		randSeed  = 49872768940 // For deterministic tests
+		keySize   = 16
+		valueSize = 16
+
+		versions = 32 // number of final versions to generate
+
+		versionOps  = 64  // number of operations (create/update/delete) per version
+		updateRatio = 0.4 // ratio of updates out of all operations
+		deleteRatio = 0.2 // ratio of deletes out of all operations
+	)
+
+	r := rand.New(rand.NewSource(randSeed))
+
+	// loadTree loads the last persisted version of a tree with random pruning settings.
+	loadTree := func(levelDB db.DB) (tree *MutableTree, version int64, options *Options) {
+		var err error
+		options = &Options{
+			KeepRecent: 5,
+			KeepEvery:  10,
+		}
+		tree, err = NewMutableTreeWithOpts(levelDB, db.NewMemDB(), 0, options)
+		require.NoError(t, err)
+		version, err = tree.Load()
+		require.NoError(t, err)
+		return
+	}
+
+	// generates random keys and values
+	randString := func(size int) string {
+		buf := make([]byte, size*3/4+1)
+		r.Read(buf)
+		return base64.StdEncoding.EncodeToString(buf)[:size]
+	}
+
+	// Use the same on-disk database for the entire run.
+	tempdir, err := ioutil.TempDir("", "iavl")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempdir)
+
+	levelDB, err := db.NewGoLevelDB("leveldb", tempdir)
+	require.NoError(t, err)
+
+	tree, version, _ := loadTree(levelDB)
+
+	// Set up a mirror of the current IAVL state, as well as the history of saved mirrors
+	// on disk and in memory.
+	mirror := make(map[string]string, versionOps)
+	mirrorKeys := make([]string, 0, versionOps)
+	//diskMirrors := map[int64]map[string]string{}
+	//memMirrors := map[int64]map[string]string{}
+
+	for version < versions {
+		for i := 0; i < versionOps; i++ {
+			switch {
+			case len(mirror) > 0 && r.Float64() <= deleteRatio:
+				index := r.Intn(len(mirrorKeys))
+				key := mirrorKeys[index]
+				mirrorKeys = append(mirrorKeys[:index], mirrorKeys[index+1:]...)
+				_, removed := tree.Remove([]byte(key))
+				require.True(t, removed)
+				delete(mirror, key)
+
+			case len(mirror) > 0 && r.Float64() <= updateRatio:
+				key := mirrorKeys[r.Intn(len(mirrorKeys))]
+				value := randString(valueSize)
+				updated := tree.Set([]byte(key), []byte(value))
+				require.True(t, updated)
+				mirror[key] = value
+
+			default:
+				key := randString(keySize)
+				value := randString(valueSize)
+				for tree.Has([]byte(key)) {
+					key = randString(keySize)
+				}
+				updated := tree.Set([]byte(key), []byte(value))
+				require.False(t, updated)
+				mirror[key] = value
+				mirrorKeys = append(mirrorKeys, key)
+			}
+		}
+		_, version, err = tree.SaveVersion()
+		require.NoError(t, err)
+
+		// Verify that the version matches the mirror completely.
+		iterated := 0
+		tree.Iterate(func(k, v []byte) bool {
+			require.Equal(t, string(v), mirror[string(k)], "Invalid value for key %q", k)
+			iterated++
+			return false
+		})
+		require.Equal(t, len(mirror), iterated)
 	}
 }
