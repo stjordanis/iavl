@@ -23,6 +23,7 @@ func TestRandomOperations(t *testing.T) {
 
 		versions     = 32  // number of final versions to generate
 		reloadChance = 0.1 // chance of tree reload after save (discards non-persisted versions).
+		deleteChance = 0.1 // chance of random version deletion after save.
 		//cacheChance  = 0.2  // chance of enabling caching
 		//cacheSizeMax = 4096 // maximum size of cache (will be random from 1)
 
@@ -120,9 +121,23 @@ func TestRandomOperations(t *testing.T) {
 			delete(memMirrors, version-options.KeepRecent)
 		}
 
+		// Delete a random version if requested, but never the latest version.
+		if r.Float64() < deleteChance {
+			versions := getMirrorVersions(diskMirrors, memMirrors)
+			if len(versions) > 2 {
+				deleteVersion := int64(versions[r.Intn(len(versions)-1)])
+				t.Logf("Deleting version %v", deleteVersion)
+				err = tree.DeleteVersion(int64(deleteVersion))
+				require.NoError(t, err)
+				delete(diskMirrors, deleteVersion)
+				delete(memMirrors, deleteVersion)
+			}
+		}
+
 		// Reload tree from last persisted version if requested, checking that it matches the
 		// latest disk mirror version and discarding memory mirrors.
 		if r.Float64() < reloadChance {
+			t.Log("Reloading tree from last persisted version")
 			tree, version, options = loadTree(levelDB)
 			assertMaxVersion(t, tree, version, diskMirrors)
 			memMirrors = make(map[int64]map[string]string, options.KeepRecent)
@@ -174,18 +189,7 @@ func assertMirror(t *testing.T, tree *MutableTree, mirror map[string]string, ver
 
 // Checks that all versions in the tree are present in the mirrors, and vice-versa.
 func assertVersions(t *testing.T, tree *MutableTree, mirrors ...map[int64]map[string]string) {
-	mirrorVersionsMap := make(map[int]bool)
-	for _, m := range mirrors {
-		for version := range m {
-			mirrorVersionsMap[int(version)] = true
-		}
-	}
-	mirrorVersions := make([]int, 0, len(mirrorVersionsMap))
-	for version := range mirrorVersionsMap {
-		mirrorVersions = append(mirrorVersions, version)
-	}
-	sort.Ints(mirrorVersions)
-	require.Equal(t, mirrorVersions, tree.AvailableVersions())
+	require.Equal(t, getMirrorVersions(mirrors...), tree.AvailableVersions())
 }
 
 // copyMirror copies a mirror map.
@@ -197,11 +201,28 @@ func copyMirror(mirror map[string]string) map[string]string {
 	return c
 }
 
-// getMirrorKeys returns the keys of a mirror, in random order.
+// getMirrorKeys returns the keys of a mirror, unsorted.
 func getMirrorKeys(mirror map[string]string) []string {
 	keys := make([]string, 0, len(mirror))
 	for key := range mirror {
 		keys = append(keys, key)
 	}
 	return keys
+}
+
+// getMirrorVersions returns the versions of the given mirrors, sorted. Returns []int to
+// match tree.AvailableVersions().
+func getMirrorVersions(mirrors ...map[int64]map[string]string) []int {
+	versionMap := make(map[int]bool)
+	for _, m := range mirrors {
+		for version := range m {
+			versionMap[int(version)] = true
+		}
+	}
+	versions := make([]int, 0, len(versionMap))
+	for version := range versionMap {
+		versions = append(versions, version)
+	}
+	sort.Ints(versions)
+	return versions
 }
