@@ -21,11 +21,14 @@ func TestRandomOperations(t *testing.T) {
 		keySize   = 16          // before base64-encoding
 		valueSize = 16          // before base64-encoding
 
-		versions     = 32  // number of final versions to generate
-		reloadChance = 0.1 // chance of tree reload after save (discards non-persisted versions).
-		deleteChance = 0.1 // chance of random version deletion after save.
-		//cacheChance  = 0.2  // chance of enabling caching
-		//cacheSizeMax = 4096 // maximum size of cache (will be random from 1)
+		versions      = 32   // number of final versions to generate
+		reloadChance  = 0.1  // chance of tree reload after save (discards non-persisted versions).
+		deleteChance  = 0.1  // chance of random version deletion after save.
+		syncChance    = 0.3  // chance of enabling sync writes on tree load
+		maxKeepEvery  = 1    // max KeepEvery (random 0-max on load)
+		maxKeepRecent = 0    // max KeepRecent (random 0-max on load, if 0 then KeepEvery=1)
+		cacheChance   = 0.4  // chance of enabling caching
+		cacheSizeMax  = 4096 // maximum size of cache (will be random from 1)
 
 		versionOps  = 64  // number of operations (create/update/delete) per version
 		updateRatio = 0.4 // ratio of updates out of all operations
@@ -37,14 +40,27 @@ func TestRandomOperations(t *testing.T) {
 	// loadTree loads the last persisted version of a tree with random pruning settings.
 	loadTree := func(levelDB db.DB) (tree *MutableTree, version int64, options *Options) {
 		var err error
-		options = &Options{
-			KeepRecent: 5,
-			KeepEvery:  10,
+		keepRecent := r.Int63n(maxKeepRecent + 1)
+		keepEvery := r.Int63n(maxKeepEvery + 1)
+		if keepRecent == 0 {
+			keepEvery = 1
 		}
-		tree, err = NewMutableTreeWithOpts(levelDB, db.NewMemDB(), 0, options)
+		options = &Options{
+			KeepRecent: keepRecent,
+			KeepEvery:  keepEvery,
+			Sync:       r.Float64() < syncChance,
+		}
+		cacheSize := 0
+		if r.Float64() < cacheChance {
+			cacheSize = int(r.Int63n(cacheSizeMax + 1))
+		}
+		tree, err = NewMutableTreeWithOpts(levelDB, db.NewMemDB(), cacheSize, options)
 		require.NoError(t, err)
 		version, err = tree.Load()
 		require.NoError(t, err)
+		t.Logf("Loaded last persisted version %v", version)
+		t.Logf("KeepRecent=%v KeepEvery=%v Sync=%v cacheSize=%v",
+			options.KeepRecent, options.KeepEvery, options.Sync, cacheSize)
 		return
 	}
 
@@ -137,7 +153,6 @@ func TestRandomOperations(t *testing.T) {
 		// Reload tree from last persisted version if requested, checking that it matches the
 		// latest disk mirror version and discarding memory mirrors.
 		if r.Float64() < reloadChance {
-			t.Log("Reloading tree from last persisted version")
 			tree, version, options = loadTree(levelDB)
 			assertMaxVersion(t, tree, version, diskMirrors)
 			memMirrors = make(map[int64]map[string]string, options.KeepRecent)
@@ -177,6 +192,8 @@ func assertMirror(t *testing.T, tree *MutableTree, mirror map[string]string, ver
 		itree, err = tree.GetImmutable(version)
 		require.NoError(t, err, "loading version %v", version)
 	}
+	// We check both ways: first check that iterated keys match the mirror, then iterate over the
+	// mirror and check with get. This is to exercise both the iteration and Get() code paths.
 	iterated := 0
 	itree.Iterate(func(key, value []byte) bool {
 		require.Equal(t, string(value), mirror[string(key)], "Invalid value for key %q", key)
@@ -185,6 +202,10 @@ func assertMirror(t *testing.T, tree *MutableTree, mirror map[string]string, ver
 	})
 	require.EqualValues(t, len(mirror), itree.Size())
 	require.EqualValues(t, len(mirror), iterated)
+	for key, value := range mirror {
+		_, actual := itree.Get([]byte(key))
+		require.Equal(t, value, string(actual))
+	}
 }
 
 // Checks that all versions in the tree are present in the mirrors, and vice-versa.
