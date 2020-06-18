@@ -175,7 +175,7 @@ func assertMirror(t *testing.T, tree *MutableTree, mirror map[string]string, ver
 	itree := tree.ImmutableTree
 	if version > 0 {
 		itree, err = tree.GetImmutable(version)
-		require.NoError(t, err)
+		require.NoError(t, err, "loading version %v", version)
 	}
 	iterated := 0
 	itree.Iterate(func(key, value []byte) bool {
