@@ -21,8 +21,8 @@ func TestRandomOperations(t *testing.T) {
 		keySize   = 16          // before base64-encoding
 		valueSize = 16          // before base64-encoding
 
-		versions = 32 // number of final versions to generate
-		//reloadChance = 0.2 // chance of tree reload after version save (discards recent versions).
+		versions     = 32  // number of final versions to generate
+		reloadChance = 0.1 // chance of tree reload after save (discards non-persisted versions).
 		//cacheChance  = 0.2  // chance of enabling caching
 		//cacheSizeMax = 4096 // maximum size of cache (will be random from 1)
 
@@ -74,7 +74,7 @@ func TestRandomOperations(t *testing.T) {
 	for version < versions {
 		for i := 0; i < versionOps; i++ {
 			switch {
-			case len(mirror) > 0 && r.Float64() <= deleteRatio:
+			case len(mirror) > 0 && r.Float64() < deleteRatio:
 				index := r.Intn(len(mirrorKeys))
 				key := mirrorKeys[index]
 				mirrorKeys = append(mirrorKeys[:index], mirrorKeys[index+1:]...)
@@ -82,7 +82,7 @@ func TestRandomOperations(t *testing.T) {
 				require.True(t, removed)
 				delete(mirror, key)
 
-			case len(mirror) > 0 && r.Float64() <= updateRatio:
+			case len(mirror) > 0 && r.Float64() < updateRatio:
 				key := mirrorKeys[r.Intn(len(mirrorKeys))]
 				value := randString(valueSize)
 				updated := tree.Set([]byte(key), []byte(value))
@@ -120,6 +120,16 @@ func TestRandomOperations(t *testing.T) {
 			delete(memMirrors, version-options.KeepRecent)
 		}
 
+		// Reload tree from last persisted version if requested, checking that it matches the
+		// latest disk mirror version and discarding memory mirrors.
+		if r.Float64() < reloadChance {
+			tree, version, options = loadTree(levelDB)
+			assertMaxVersion(t, tree, version, diskMirrors)
+			memMirrors = make(map[int64]map[string]string, options.KeepRecent)
+			mirror = copyMirror(diskMirrors[version])
+			mirrorKeys = getMirrorKeys(mirror)
+		}
+
 		// Verify all historical versions.
 		assertVersions(t, tree, diskMirrors, memMirrors)
 
@@ -130,9 +140,18 @@ func TestRandomOperations(t *testing.T) {
 		for memVersion, memMirror := range memMirrors {
 			assertMirror(t, tree, memMirror, memVersion)
 		}
-
-		// Log progress
 	}
+}
+
+// Checks that a version is the maximum mirrored version.
+func assertMaxVersion(t *testing.T, tree *MutableTree, version int64, mirrors map[int64]map[string]string) {
+	max := int64(0)
+	for v := range mirrors {
+		if v > max {
+			max = v
+		}
+	}
+	require.Equal(t, max, version)
 }
 
 // Checks that a mirror, optionally for a given version, matches the tree contents.
@@ -169,10 +188,20 @@ func assertVersions(t *testing.T, tree *MutableTree, mirrors ...map[int64]map[st
 	require.Equal(t, mirrorVersions, tree.AvailableVersions())
 }
 
+// copyMirror copies a mirror map.
 func copyMirror(mirror map[string]string) map[string]string {
 	c := make(map[string]string, len(mirror))
 	for k, v := range mirror {
 		c[k] = v
 	}
 	return c
+}
+
+// getMirrorKeys returns the keys of a mirror, in random order.
+func getMirrorKeys(mirror map[string]string) []string {
+	keys := make([]string, 0, len(mirror))
+	for key := range mirror {
+		keys = append(keys, key)
+	}
+	return keys
 }
