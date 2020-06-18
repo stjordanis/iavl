@@ -15,6 +15,7 @@ import (
 
 // Randomized test that runs all sorts of random operations, mirroring them in a known-good
 // map, and verifying the state of the tree.
+// FIXME This should test LoadVersionForOverwriting as well.
 func TestRandomOperations(t *testing.T) {
 	const (
 		randSeed  = 49872768940 // for deterministic tests
@@ -26,8 +27,8 @@ func TestRandomOperations(t *testing.T) {
 		deleteChance  = 0.1  // chance of random version deletion after save.
 		flushChance   = 0.1  // chance of random version being flushed with FlushVersion() after save.
 		syncChance    = 0.3  // chance of enabling sync writes on tree load
-		maxKeepEvery  = 1    // max KeepEvery (random 0-max on load)
-		maxKeepRecent = 0    // max KeepRecent (random 0-max on load, if 0 then KeepEvery=1)
+		maxKeepEvery  = 10   // max KeepEvery (random 0-max on load)
+		maxKeepRecent = 10   // max KeepRecent (random 0-max on load, if 0 then KeepEvery=1)
 		cacheChance   = 0.4  // chance of enabling caching
 		cacheSizeMax  = 4096 // maximum size of cache (will be random from 1)
 
