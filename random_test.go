@@ -22,7 +22,7 @@ func TestRandomOperations(t *testing.T) {
 		keySize   = 16          // before base64-encoding
 		valueSize = 16          // before base64-encoding
 
-		versions      = 32   // number of final versions to generate
+		versions      = 64   // number of final versions to generate
 		reloadChance  = 0.1  // chance of tree reload after save (discards non-persisted versions).
 		deleteChance  = 0.1  // chance of random version deletion after save.
 		flushChance   = 0.1  // chance of random version being flushed with FlushVersion() after save.
