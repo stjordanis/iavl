@@ -15,20 +15,20 @@ import (
 
 // Randomized test that runs all sorts of random operations, mirroring them in a known-good
 // map, and verifying the state of the tree.
-// FIXME This should test LoadVersionForOverwriting as well.
 func TestRandomOperations(t *testing.T) {
 	const (
 		randSeed  = 49872768940 // for deterministic tests
 		keySize   = 16          // before base64-encoding
 		valueSize = 16          // before base64-encoding
 
-		versions      = 64  // number of final versions to generate
-		reloadChance  = 0.1 // chance of tree reload after save (discards non-persisted versions).
-		deleteChance  = 0.1 // chance of random version deletion after save.
-		flushChance   = 0.1 // chance of random version being flushed with FlushVersion() after save.
+		versions      = 32  // number of final versions to generate
+		reloadChance  = 0.1 // chance of tree reload after save (discards non-persisted versions)
+		deleteChance  = 0.1 // chance of random version deletion after save
+		flushChance   = 0.1 // chance of random version being flushed with FlushVersion() after save
+		revertChance  = 0.1 // chance to revert tree to random version with LoadVersionForOverwriting
 		syncChance    = 0.3 // chance of enabling sync writes on tree load
-		maxKeepEvery  = 10  // max KeepEvery (random 0-max on load)
-		maxKeepRecent = 10  // max KeepRecent (random 0-max on load, if 0 then KeepEvery=1)
+		maxKeepEvery  = 1   // max KeepEvery (random 0-max on load)
+		maxKeepRecent = 0   // max KeepRecent (random 0-max on load, if 0 then KeepEvery=1)
 		cacheChance   = 0.4 // chance of enabling caching
 		cacheSizeMax  = 256 // maximum size of cache (will be random from 1)
 
@@ -173,6 +173,33 @@ func TestRandomOperations(t *testing.T) {
 			memMirrors = make(map[int64]map[string]string, options.KeepRecent)
 			mirror = copyMirror(diskMirrors[version])
 			mirrorKeys = getMirrorKeys(mirror)
+		}
+
+		// Revert tree to historical version if requested, deleting all subsequent versions.
+		if r.Float64() < revertChance {
+			versions := getMirrorVersions(diskMirrors, memMirrors)
+			target := int64(versions[r.Intn(len(versions)-1)])
+			t.Logf("Reverting to version %v", target)
+			_, err = tree.LoadVersionForOverwriting(target)
+			require.NoError(t, err, "Failed to revert to version %v", target)
+			if m, ok := diskMirrors[target]; ok {
+				mirror = copyMirror(m)
+			} else if m, ok := memMirrors[target]; ok {
+				mirror = copyMirror(m)
+			} else {
+				t.Fatalf("Mirror not found for revert target %v", target)
+			}
+			mirrorKeys = getMirrorKeys(mirror)
+			for v := range diskMirrors {
+				if v > target {
+					delete(diskMirrors, v)
+				}
+			}
+			for v := range memMirrors {
+				if v > target {
+					delete(memMirrors, v)
+				}
+			}
 		}
 
 		// Verify all historical versions.
