@@ -21,11 +21,11 @@ func TestRandomOperations(t *testing.T) {
 		keySize   = 16          // before base64-encoding
 		valueSize = 16          // before base64-encoding
 
-		versions      = 32  // number of final versions to generate
+		versions      = 64  // number of final versions to generate
 		reloadChance  = 0.1 // chance of tree reload after save (discards non-persisted versions)
 		deleteChance  = 0.1 // chance of random version deletion after save
 		flushChance   = 0.1 // chance of random version being flushed with FlushVersion() after save
-		revertChance  = 0.1 // chance to revert tree to random version with LoadVersionForOverwriting
+		revertChance  = 0.0 // chance to revert tree to random version with LoadVersionForOverwriting
 		syncChance    = 0.3 // chance of enabling sync writes on tree load
 		maxKeepEvery  = 1   // max KeepEvery (random 0-max on load)
 		maxKeepRecent = 0   // max KeepRecent (random 0-max on load, if 0 then KeepEvery=1)
@@ -142,13 +142,15 @@ func TestRandomOperations(t *testing.T) {
 		// Flush a random version if requested.
 		if r.Float64() < flushChance {
 			versions := getMirrorVersions(diskMirrors, memMirrors)
-			flushVersion := int64(versions[r.Intn(len(versions)-1)])
-			t.Logf("Flushing version %v", flushVersion)
-			err = tree.FlushVersion(int64(flushVersion))
-			require.NoError(t, err)
-			if m, ok := memMirrors[flushVersion]; ok {
-				diskMirrors[flushVersion] = copyMirror(m)
-				delete(memMirrors, flushVersion)
+			if len(versions) > 1 {
+				flushVersion := int64(versions[r.Intn(len(versions)-1)])
+				t.Logf("Flushing version %v", flushVersion)
+				err = tree.FlushVersion(int64(flushVersion))
+				require.NoError(t, err)
+				if m, ok := memMirrors[flushVersion]; ok {
+					diskMirrors[flushVersion] = copyMirror(m)
+					delete(memMirrors, flushVersion)
+				}
 			}
 		}
 
