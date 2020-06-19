@@ -145,7 +145,7 @@ func TestRandomOperations(t *testing.T) {
 			if len(versions) > 1 {
 				flushVersion := int64(versions[r.Intn(len(versions)-1)])
 				t.Logf("Flushing version %v", flushVersion)
-				err = tree.FlushVersion(int64(flushVersion))
+				err = tree.FlushVersion(flushVersion)
 				require.NoError(t, err)
 				if m, ok := memMirrors[flushVersion]; ok {
 					diskMirrors[flushVersion] = copyMirror(m)
@@ -160,7 +160,7 @@ func TestRandomOperations(t *testing.T) {
 			if len(versions) > 2 {
 				deleteVersion := int64(versions[r.Intn(len(versions)-1)])
 				t.Logf("Deleting version %v", deleteVersion)
-				err = tree.DeleteVersion(int64(deleteVersion))
+				err = tree.DeleteVersion(deleteVersion)
 				require.NoError(t, err)
 				delete(diskMirrors, deleteVersion)
 				delete(memMirrors, deleteVersion)
@@ -235,9 +235,9 @@ func TestRandomOperations(t *testing.T) {
 	}
 	require.EqualValues(t, []int{int(version)}, tree.AvailableVersions())
 
-	assertOrphans(t, tree, 0)
 	assertMirror(t, tree, mirror, version)
 	assertMirror(t, tree, mirror, 0)
+	assertOrphans(t, tree, 0)
 	t.Logf("Final version %v is correct, with no stray orphans", version)
 }
 
