@@ -22,15 +22,15 @@ func TestRandomOperations(t *testing.T) {
 		keySize   = 16          // before base64-encoding
 		valueSize = 16          // before base64-encoding
 
-		versions      = 64   // number of final versions to generate
-		reloadChance  = 0.1  // chance of tree reload after save (discards non-persisted versions).
-		deleteChance  = 0.1  // chance of random version deletion after save.
-		flushChance   = 0.1  // chance of random version being flushed with FlushVersion() after save.
-		syncChance    = 0.3  // chance of enabling sync writes on tree load
-		maxKeepEvery  = 10   // max KeepEvery (random 0-max on load)
-		maxKeepRecent = 10   // max KeepRecent (random 0-max on load, if 0 then KeepEvery=1)
-		cacheChance   = 0.4  // chance of enabling caching
-		cacheSizeMax  = 4096 // maximum size of cache (will be random from 1)
+		versions      = 64  // number of final versions to generate
+		reloadChance  = 0.1 // chance of tree reload after save (discards non-persisted versions).
+		deleteChance  = 0.1 // chance of random version deletion after save.
+		flushChance   = 0.1 // chance of random version being flushed with FlushVersion() after save.
+		syncChance    = 0.3 // chance of enabling sync writes on tree load
+		maxKeepEvery  = 10  // max KeepEvery (random 0-max on load)
+		maxKeepRecent = 10  // max KeepRecent (random 0-max on load, if 0 then KeepEvery=1)
+		cacheChance   = 0.4 // chance of enabling caching
+		cacheSizeMax  = 256 // maximum size of cache (will be random from 1)
 
 		versionOps  = 64  // number of operations (create/update/delete) per version
 		updateRatio = 0.4 // ratio of updates out of all operations
@@ -186,6 +186,39 @@ func TestRandomOperations(t *testing.T) {
 			assertMirror(t, tree, memMirror, memVersion)
 		}
 	}
+
+	// Once we're done, flush the latest version to disk, delete all prior versions in random
+	// order, make sure all orphans have been removed, and check that the latest versions matches
+	// the mirror.
+	t.Logf("Flushing latest version %v to disk", version)
+	err = tree.FlushVersion(version)
+	require.NoError(t, err)
+
+	remaining := tree.AvailableVersions()
+	remaining = remaining[:len(remaining)-1]
+	for len(remaining) > 0 {
+		i := r.Intn(len(remaining))
+		deleteVersion := int64(remaining[i])
+		remaining = append(remaining[:i], remaining[i+1:]...)
+		t.Logf("Deleting version %v", deleteVersion)
+		err = tree.DeleteVersion(deleteVersion)
+		require.NoError(t, err)
+	}
+	require.EqualValues(t, []int{int(version)}, tree.AvailableVersions())
+
+	assertOrphans(t, tree, 0)
+	assertMirror(t, tree, mirror, version)
+	assertMirror(t, tree, mirror, 0)
+	t.Logf("Final version %v is correct, with no stray orphans", version)
+}
+
+// Checks that the tree has the given number of orphan nodes.
+func assertOrphans(t *testing.T, tree *MutableTree, expected int) {
+	count := 0
+	tree.ndb.traverseOrphans(func(k, v []byte) {
+		count++
+	})
+	require.EqualValues(t, expected, count, "Expected %v orphans, got %v", expected, count)
 }
 
 // Checks that a version is the maximum mirrored version.
