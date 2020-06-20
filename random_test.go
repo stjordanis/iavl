@@ -131,7 +131,7 @@ func TestRandomOperations(t *testing.T) {
 
 		// Save the mirror of this version as a disk and/or recent mirror, as appropriate,
 		// and remove expired memory/recent mirror.
-		if version%options.KeepEvery == 0 {
+		if options.KeepEvery > 0 && version%options.KeepEvery == 0 {
 			diskMirrors[version] = copyMirror(mirror)
 		}
 		if options.KeepRecent > 0 {
